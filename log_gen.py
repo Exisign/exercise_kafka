@@ -44,9 +44,12 @@ def generate_logs():
     print(f'로그 발생 시작. 완료 {data["timestamp"]}')
 # 4. 로그 발생기 가동
 def main():
-    while True:
-        generate_logs()
-        time.sleep(2)       # 2초 대기(임의 설정)
+    try:
+        while True:
+            generate_logs()
+            time.sleep(2)       # 2초 대기(임의 설정)
+    except Exception:
+        print('종료 완료')
     pass
 
 # 5. 프로그램 시작
