@@ -64,6 +64,10 @@ MESSAGING    :     Kafka / MSK (Broker) <-------------------------------------+-
                |          +----( Topic A: factory-json-topic ) <--- [Channel A Result]
                |          +----( Topic B: factory-text-topic ) <--- [Channel B Result]
                v                                                               |
+               v                                                               |
+                                                                        kafka connect / ui
+                                                                                |
+                                                                                v               
 VISUALIZE    :     OpenSearch (DB)      <---( Indexing & Search )---->  DASHBOARD (Kibana)
 ====================================================================================================
 ```
@@ -94,9 +98,13 @@ VISUALIZE    :     OpenSearch (DB)      <---( Indexing & Search )---->  DASHBOAR
                |          +----( 토픽 A: factory-json-topic ) <--- [채널 A 결과물]
                |          +----( 토픽 B: factory-text-topic ) <--- [채널 B 결과물]
                v                                                                  |
+                                                                            kafka connect / ui
+                                                                                  |
+                                                                                  v
 시각화/분석  :     OpenSearch (DB)      <---( 인덱싱 및 검색 )------>  대시보드 (Kibana)
 ====================================================================================================
 ```
+
 
 # 프로젝트 재구성
 - docker-compose.yml 수정 (KRaft 적용된)
@@ -105,41 +113,41 @@ VISUALIZE    :     OpenSearch (DB)      <---( Indexing & Search )---->  DASHBOAR
     docker compose up -d
 ```
 
-# Fluentd(40~60MB) <-> Fluent-Bit(1~5MB)
+# Fluentd(40~60MB) <-> Fluent-Bit (1~5MB)
 - 태그 기반 라우팅 도구(Tag Based Routing)
-- Ruby(C켤합) 구조 <-> C
+- Ruby(C 결합) 구조 <-> C 
 - fluent-bit/etc/fluent-bit.conf 에서 구성 기술 완료
 - 목표
     - 데이터 수집, 처리, 전달 => ETL 도구
     - 경량형 오픈 소스 로그 프로세서
     - 고가용성, 고성능 처리, 데이터 처리 안정성
-- 파이프라인
-    - Input : 파일, 시스템 매트릭, http 스트림, ... 다양한 소스 제공
-    - Service, Parser, Filter, Buffer, Routing
+- 파이프라인 
+    - Input : 파일, 시스템 매트릭, http 스트림, .. 다양한 소스 제공
+    - Service, Parser, Filter, Buffer, Rounting
     - Output : Kafka/Opensearch/Elasticsearch/s3/... 모두 가능함
+- 지원 플러그인 
+    - 1000여개 <-> 100여개
+
 - conf 구성 => 규칙 기술
     ```
-        docker compose restart
+    docker compose restart
     ```
 
-
-
-- 컨슈머 구동
-    # json 관련 토픽 컨슈머
+- 커슈머 구동
     ```
-        PS ... > docker exec -it kafka-local /bash
-        >./opt/kafka/bin/kafka-console-consumer.sh --topic factory-json-Topics --bootstrap-server 127.0.0.1:9092 --from-beginning
-    ```
+        PS ...> docker exec -it kafka-local bash
 
-    # text 관련 토픽 컨슈머
-        PS ... > docker exec -it kafka-local /bash
-        >./opt/kafka/bin/kafka-console-consumer.sh --topic factory-text-Topics --bootstrap-server 127.0.0.1:9092 --from-beginning
+        # json 관련 토픽 커슈머
+        > ./opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:9092 --topic factory-json-topic --from-beginning
+
+        # text 관련 토픽 커슈머
+        > ./opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:9092 --topic factory-text-topic --from-beginning
+    ```
 
 - 로그 발생 -> 카프카 컨슈머 수시 확인
     ```
         python log_gen.py
     ```
-
     
 - conf가 수정되면
     - `docker compose restart` 반드시 수행
@@ -186,4 +194,29 @@ VISUALIZE    :     OpenSearch (DB)      <---( Indexing & Search )---->  DASHBOAR
 - 메세지의 흐름, connect를 통해 전달이 잘되는지 등등 모니터링 
 
 # 로컬 -> 클라우드 연결
-- kafka connect
+- kafka connect => X (플러그인 자주 변경, 정책 변경)
+- 전용 포워더로 변경
+    - Vector는 Datadog에서 만든 초고속 데이터 파이프라인 도구
+    - Java 의존성이 없고 단일 실행 파일로 돌아가서 Kafka Connect보다 훨씬 가볍고 설치가 쉬움
+    - YAML 설정 파일 하나로 모든 게 끝남.
+    - 메모리 사용량이 매우 적음 (Rust 기반).
+    - 단축된 파이프라인: Kafka -> Vector -> Firehose 구조를 YAML 설정 하나로 끝
+- docker-compose.yml 수정 (이미 반영되어 있음)
+    ```
+        vector:
+            image: timberio/vector:0.36.0-debian # 최신 안정 버전
+            container_name: vector
+            volumes:
+                - ./vector.yaml:/etc/vector/vector.yaml:ro
+            environment:
+                # .env 파일에 정의된 AWS 인증 정보를 전달
+                AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY}"
+                AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_KEY}"
+                AWS_REGION: "${AWS_REGION}"
+            depends_on:
+                - kafka
+            networks:
+                - kafka-net
+    ```
+- vector.yaml 작성
+    - 파일 참고
